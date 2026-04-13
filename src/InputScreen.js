@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
 function buildSlackText(report, type) {
+  const id = report.incidentId;
   const eventLabel = type === "occurred" ? "発生" : "復旧";
 
   return [
-    `[${eventLabel}]`,
+    `[${eventLabel}]#${id}`,
     `${report.category}`,      // ← 大項目
     `${report.subCategory}`,   // ← 中項目
     `担当:${report.worker}`,
@@ -162,6 +163,16 @@ function formatDuration(seconds) {
   const min = Math.floor(seconds / 60);
   const sec = seconds % 60;
   return `${min}分${sec}秒`;
+}
+
+function getNextIncidentNumber() {
+  const key = "incident_counter";
+  const current = Number(localStorage.getItem(key) || "0");
+  const next = current + 1;
+
+  localStorage.setItem(key, String(next));
+
+  return String(next).padStart(6, "0"); // 000001形式
 }
 
 function toTimeOnly(value) {
@@ -346,7 +357,7 @@ export default function InputScreen({ onAddReport, darkMode, theme }) {
     }
   
     const occurred = getNowDateTimeString();
-    const newIncidentId = `incident-${Date.now()}`;
+    const newIncidentId = getNextIncidentNumber();
   
     setOccurredAt(occurred);
     setRecoveredAt("");
