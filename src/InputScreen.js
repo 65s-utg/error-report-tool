@@ -2,21 +2,14 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 
 function buildSlackText(report, type) {
   const eventLabel = type === "occurred" ? "発生" : "復旧";
-  const downtime =
-    type === "recovered" ? ` | 停止:${formatDuration(report.downtimeSeconds)}` : "";
-
-  const detailText = report.detail ? ` | 詳細:${report.detail}` : "";
 
   return [
     `[${eventLabel}]`,
-    `ライン:${report.line}`,
-    `大項目:${report.category}`,
-    `中項目:${report.subCategory}`,
-    `班:${report.team}`,
+    `${report.category}`,      // ← 大項目
+    `${report.subCategory}`,   // ← 中項目
     `担当:${report.worker}`,
-    `発生:${report.occurredAt}`,
-    type === "recovered" ? `復旧:${report.recoveredAt}` : null,
-    `${downtime}${detailText}`,
+    type === "recovered" ? `停止:${formatDuration(report.downtimeSeconds)}` : null,
+    report.detail ? `詳細:${report.detail}` : null,
   ]
     .filter(Boolean)
     .join(" | ")
