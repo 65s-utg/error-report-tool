@@ -2,17 +2,6 @@ import React, { useMemo, useState } from "react";
 import InputScreen from "./InputScreen";
 import AnalysisScreen from "./AnalysisScreen";
 
-const lines = ["G3", "M5", "M6", "M7", "M8", "M9"];
-const categories = [
-  "ラベラー",
-  "実ボトル",
-  "キャップIJP",
-  "コンベア",
-  "シュリンク",
-  "ケーサー",
-  "ケースIJP",
-];
-
 const subCategoryMap = {
   ラベラー: [
     "ラベルフィード異常",
@@ -175,6 +164,7 @@ function buildSampleReports() {
 
     samples.push({
       id: id++,
+      incidentId: `sample-${id}`,
       line,
       category,
       subCategory,
@@ -184,6 +174,7 @@ function buildSampleReports() {
       occurredAt: formatDateTime(occurred),
       recoveredAt: recovered ? formatDateTime(recovered) : "",
       downtimeSeconds: recovered ? downtimeSeconds : 0,
+      status: recovered ? "復旧" : "発生中",
     });
   }
 
@@ -222,14 +213,36 @@ export default function App() {
         buttonIdle: "#0f172a",
       };
 
-  const handleAddReport = (newReport) => {
-    setReports((prev) => [
-      {
-        id: Date.now(),
-        ...newReport,
-      },
-      ...prev,
-    ]);
+  const handleAddReport = (report) => {
+    setReports((prev) => {
+      const existingIndex = prev.findIndex((item) => item.incidentId === report.incidentId);
+
+      if (existingIndex >= 0) {
+        const updated = [...prev];
+        updated[existingIndex] = {
+          ...updated[existingIndex],
+          ...report,
+        };
+
+        return updated.sort(
+          (a, b) =>
+            new Date(b.occurredAt.replace(" ", "T")) -
+            new Date(a.occurredAt.replace(" ", "T"))
+        );
+      }
+
+      return [
+        {
+          id: Date.now(),
+          ...report,
+        },
+        ...prev,
+      ].sort(
+        (a, b) =>
+          new Date(b.occurredAt.replace(" ", "T")) -
+          new Date(a.occurredAt.replace(" ", "T"))
+      );
+    });
   };
 
   return (

@@ -1,13 +1,30 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
+async function sendToSlack(report, type) {
+  const res = await fetch('/api/slack-post', {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      ...report,
+      type,
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error("Slack送信に失敗しました");
+  }
+}
 const lineOptions = ["G3", "M5", "M6", "M7", "M8", "M9"];
 const teamOptions = ["A班", "B班", "C班", "D班"];
 
+// 読み仮名順に並べ替え済み
 const workerMap = {
-  A班: ["佐藤", "鈴木", "高橋", "田中", "伊藤", "渡辺"],
-  B班: ["山本", "中村", "小林", "加藤", "吉田", "山田"],
-  C班: ["松本", "井上", "木村", "林", "清水", "山崎"],
-  D班: ["森", "池田", "橋本", "阿部", "石川", "山口"],
+  A班: ["伊藤", "佐藤", "鈴木", "高橋", "田中", "渡辺"],
+  B班: ["加藤", "小林", "中村", "山田", "山本", "吉田"],
+  C班: ["井上", "木村", "清水", "林", "松本", "山崎"],
+  D班: ["阿部", "石川", "池田", "橋本", "森", "山口"],
 };
 
 const categoryOptions = [
@@ -161,32 +178,31 @@ export default function InputScreen({ onAddReport, darkMode, theme }) {
   const [detail, setDetail] = useState("");
   const [occurredAt, setOccurredAt] = useState("");
   const [recoveredAt, setRecoveredAt] = useState("");
+
+  const [displayOccurredAt, setDisplayOccurredAt] = useState("");
+  const [displayRecoveredAt, setDisplayRecoveredAt] = useState("");
+  const [displayDowntimeSeconds, setDisplayDowntimeSeconds] = useState(0);
+
+  const [incidentId, setIncidentId] = useState("");
   const [notice, setNotice] = useState("");
-  const [tick, setTick] = useState(0);
+  const [, setTick] = useState(0);
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
-  const [subCategoryOpen, setSubCategoryOpen] = useState(false);
+
+  const clearDisplayTimerRef = useRef(null);
 
   const subCategoryOptions = category ? subCategoryMap[category] || [] : [];
   const isOngoing = Boolean(occurredAt && !recoveredAt);
 
   const workerOptions = useMemo(() => {
     if (!team) return [];
+    return workerMap[team] || [];
+  }, [team]);
 
-    const base = workerMap[team] || [];
-    const recentByTeam = getRecentWorkersByTeam();
-    const recent = Array.isArray(recentByTeam[team]) ? recentByTeam[team] : [];
-
-    let sorted = [
-      ...recent.filter((name) => base.includes(name)),
-      ...base.filter((name) => !recent.includes(name)),
-    ];
-
-    if (worker && sorted.includes(worker)) {
-      sorted = [worker, ...sorted.filter((name) => name !== worker)];
-    }
-
-    return sorted;
-  }, [team, worker]);
+  const isLineMissing = !line;
+  const isCategoryMissing = !category;
+  const isSubCategoryMissing = !subCategory;
+  const isTeamMissing = !team;
+  const isWorkerMissing = !worker;
 
   useEffect(() => {
     const savedLine = localStorage.getItem(STORAGE_KEYS.line);
@@ -214,25 +230,14 @@ export default function InputScreen({ onAddReport, darkMode, theme }) {
   }, []);
 
   useEffect(() => {
-    if (!isMobile) {
-      setSubCategoryOpen(true);
-    } else {
-      setSubCategoryOpen(false);
-    }
-  }, [isMobile]);
-
-  useEffect(() => {
     if (category) {
       setSubCategory("");
-      if (isMobile) {
-        setSubCategoryOpen(true);
-      }
     }
-  }, [category, isMobile]);
+  }, [category]);
 
   useEffect(() => {
     if (!notice) return;
-    const timer = setTimeout(() => setNotice(""), 3000);
+    const timer = setTimeout(() => setNotice(""), 6000);
     return () => clearTimeout(timer);
   }, [notice]);
 
@@ -255,7 +260,7 @@ export default function InputScreen({ onAddReport, darkMode, theme }) {
           background-color: rgba(239, 68, 68, 0.08);
         }
         50% {
-          background-color: rgba(239, 68, 68, 0.22);
+          background-color: rgba(239, 68, 68, 0.16);
         }
         100% {
           background-color: rgba(239, 68, 68, 0.08);
@@ -265,21 +270,22 @@ export default function InputScreen({ onAddReport, darkMode, theme }) {
     document.head.appendChild(style);
   }, []);
 
-  const downtimeSeconds = useMemo(() => {
-    return calcDowntimeSeconds(occurredAt, recoveredAt);
-  }, [occurredAt, recoveredAt, tick]);
+  useEffect(() => {
+    return () => {
+      if (clearDisplayTimerRef.current) {
+        clearTimeout(clearDisplayTimerRef.current);
+      }
+    };
+  }, []);
+
+  const liveDowntimeSeconds = calcDowntimeSeconds(occurredAt, recoveredAt);
+
+  const shownOccurredAt = isOngoing ? occurredAt : displayOccurredAt;
+  const shownRecoveredAt = isOngoing ? recoveredAt : displayRecoveredAt;
+  const shownDowntimeSeconds = isOngoing ? liveDowntimeSeconds : displayDowntimeSeconds;
 
   const handleCategoryClick = (value) => {
     setCategory(value);
-  };
-
-  const handleRecordOccurred = () => {
-    setOccurredAt(getNowDateTimeString());
-    setRecoveredAt("");
-  };
-
-  const handleRecordRecovered = () => {
-    setRecoveredAt(getNowDateTimeString());
   };
 
   const handleTeamChange = (value) => {
@@ -288,15 +294,97 @@ export default function InputScreen({ onAddReport, darkMode, theme }) {
     setWorker("");
   };
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
+  const validateRequiredFields = () => {
+    if (!line || !category || !subCategory || !team || !worker) {
+      setNotice("ライン・大項目・中項目・担当班・担当者を入力してください");
+      return false;
+    }
+    return true;
+  };
 
-    if (!line || !category || !subCategory) {
-      setNotice("トラブルライン・大項目・中項目は必須です");
+  const saveSelections = () => {
+    localStorage.setItem(STORAGE_KEYS.line, line);
+    localStorage.setItem(STORAGE_KEYS.team, team);
+    localStorage.setItem(STORAGE_KEYS.worker, worker);
+    saveRecentWorkerByTeam(team, worker);
+  };
+
+  const resetFormAfterRecovery = () => {
+    setCategory("");
+    setSubCategory("");
+    setDetail("");
+  };
+
+  const handleRecordOccurred = async() => {
+    if (!validateRequiredFields()) return;
+    if (isOngoing) {
+      setNotice("この案件はすでに発生中です");
       return;
     }
 
+    if (clearDisplayTimerRef.current) {
+      clearTimeout(clearDisplayTimerRef.current);
+      clearDisplayTimerRef.current = null;
+    }
+
+    const occurred = getNowDateTimeString();
+    const newIncidentId = `incident-${Date.now()}`;
+
+    setOccurredAt(occurred);
+    setRecoveredAt("");
+    setIncidentId(newIncidentId);
+
     const report = {
+      incidentId: newIncidentId,
+      line,
+      category,
+      subCategory,
+      team,
+      worker,
+      detail: detail.trim(),
+      occurredAt: occurred,
+      recoveredAt: "",
+      downtimeSeconds: 0,
+      status: "発生中",
+    };
+
+    onAddReport(report);
+    await sendToSlack(report, "occurred");
+    saveSelections();
+    setNotice(`Slackの${line}チャンネルに発生を投稿しました`);
+  };
+
+  const handleRecordRecovered = async () => {
+    if (!occurredAt || !incidentId) {
+      setNotice("先に発生を登録してください");
+      return;
+    }
+
+    if (clearDisplayTimerRef.current) {
+      clearTimeout(clearDisplayTimerRef.current);
+      clearDisplayTimerRef.current = null;
+    }
+
+    const recovered = getNowDateTimeString();
+    const seconds = calcDowntimeSeconds(occurredAt, recovered);
+
+    setRecoveredAt(recovered);
+    setDisplayOccurredAt(occurredAt);
+    setDisplayRecoveredAt(recovered);
+    setDisplayDowntimeSeconds(seconds);
+
+    clearDisplayTimerRef.current = setTimeout(() => {
+      setOccurredAt("");
+      setRecoveredAt("");
+      setDisplayOccurredAt("");
+      setDisplayRecoveredAt("");
+      setDisplayDowntimeSeconds(0);
+      setIncidentId("");
+      clearDisplayTimerRef.current = null;
+    }, 6000);
+
+    const report = {
+      incidentId,
       line,
       category,
       subCategory,
@@ -304,28 +392,17 @@ export default function InputScreen({ onAddReport, darkMode, theme }) {
       worker,
       detail: detail.trim(),
       occurredAt,
-      recoveredAt,
-      downtimeSeconds,
+      recoveredAt: recovered,
+      downtimeSeconds: seconds,
+      status: "復旧",
     };
 
     onAddReport(report);
+    await sendToSlack(report, "recovered");
+    saveSelections();
+    setNotice(`Slackの${line}チャンネルに復旧を投稿しました`);
 
-    localStorage.setItem(STORAGE_KEYS.line, line);
-    localStorage.setItem(STORAGE_KEYS.team, team);
-    localStorage.setItem(STORAGE_KEYS.worker, worker);
-    saveRecentWorkerByTeam(team, worker);
-
-    setNotice(`Slackの${line}チャンネルに登録されました`);
-
-    setCategory("");
-    setSubCategory("");
-    setDetail("");
-    setOccurredAt("");
-    setRecoveredAt("");
-
-    if (isMobile) {
-      setSubCategoryOpen(false);
-    }
+    resetFormAfterRecovery();
   };
 
   const panelBg = darkMode ? theme.panelBg : "#ffffff";
@@ -353,8 +430,6 @@ export default function InputScreen({ onAddReport, darkMode, theme }) {
 
   return (
     <div style={{ display: "grid", gap: "12px" }}>
-      {!isMobile ? noticeBar : null}
-
       <div
         style={{
           backgroundColor: panelBg,
@@ -370,7 +445,7 @@ export default function InputScreen({ onAddReport, darkMode, theme }) {
           入力画面
         </h2>
 
-        <form onSubmit={handleSubmit}>
+        <form>
           <div style={{ display: "grid", gap: "14px" }}>
             <div>
               <label style={{ ...sectionLabel, color: text }}>トラブルライン</label>
@@ -380,7 +455,7 @@ export default function InputScreen({ onAddReport, darkMode, theme }) {
                     key={option}
                     type="button"
                     onClick={() => setLine(option)}
-                    style={selectButtonStyle(line === option, darkMode)}
+                    style={selectButtonStyle(line === option, darkMode, isLineMissing)}
                   >
                     {option}
                   </button>
@@ -396,7 +471,7 @@ export default function InputScreen({ onAddReport, darkMode, theme }) {
                     key={option}
                     type="button"
                     onClick={() => handleCategoryClick(option)}
-                    style={selectButtonStyle(category === option, darkMode)}
+                    style={selectButtonStyle(category === option, darkMode, isCategoryMissing)}
                   >
                     {option}
                   </button>
@@ -404,70 +479,36 @@ export default function InputScreen({ onAddReport, darkMode, theme }) {
               </div>
             </div>
 
-            {isMobile ? (
-              <div>
-                <button
-                  type="button"
-                  onClick={() => setSubCategoryOpen((prev) => !prev)}
-                  style={{
-                    width: "100%",
-                    minHeight: "46px",
-                    padding: "12px 14px",
-                    borderRadius: "12px",
-                    border: `1px solid ${border}`,
-                    backgroundColor: darkMode ? "#0f172a" : "#ffffff",
-                    color: text,
-                    fontWeight: 800,
-                    fontSize: "14px",
-                    textAlign: "left",
-                    cursor: "pointer",
-                  }}
-                >
-                  {subCategoryOpen ? "中項目を閉じる" : "中項目を開く"}
-                  {subCategory ? `：${subCategory}` : ""}
-                </button>
-
-                {subCategoryOpen ? (
-                  <div style={{ marginTop: "10px" }}>
-                    <label style={{ ...sectionLabel, color: text }}>中項目</label>
-                    <select
-                      value={subCategory}
-                      onChange={(e) => setSubCategory(e.target.value)}
-                      style={{ ...inputStyle, backgroundColor: inputBg, color: text, borderColor: border }}
-                      disabled={!category}
-                    >
-                      <option value="">
-                        {category ? "中項目を選択してください" : "先に大項目を選択してください"}
-                      </option>
-                      {subCategoryOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ) : null}
-              </div>
-            ) : (
-              <div>
-                <label style={{ ...sectionLabel, color: text }}>中項目</label>
-                <select
-                  value={subCategory}
-                  onChange={(e) => setSubCategory(e.target.value)}
-                  style={{ ...inputStyle, backgroundColor: inputBg, color: text, borderColor: border }}
-                  disabled={!category}
-                >
-                  <option value="">
-                    {category ? "中項目を選択してください" : "先に大項目を選択してください"}
+            <div>
+              <label style={{ ...sectionLabel, color: text }}>中項目</label>
+              <select
+                value={subCategory}
+                onChange={(e) => setSubCategory(e.target.value)}
+                style={{
+                  ...inputStyle,
+                  backgroundColor: isSubCategoryMissing
+                    ? darkMode
+                      ? "rgba(245, 158, 11, 0.10)"
+                      : "#fff9db"
+                    : inputBg,
+                  color: text,
+                  borderColor: isSubCategoryMissing ? (darkMode ? "#f59e0b" : "#fcd34d") : border,
+                  boxShadow: isSubCategoryMissing
+                    ? "0 0 0 1px rgba(245, 158, 11, 0.18) inset"
+                    : "none",
+                }}
+                disabled={!category}
+              >
+                <option value="">
+                  {category ? "中項目を選択してください" : "先に大項目を選択してください"}
+                </option>
+                {subCategoryOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
                   </option>
-                  {subCategoryOptions.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
+                ))}
+              </select>
+            </div>
 
             <div
               style={{
@@ -481,7 +522,19 @@ export default function InputScreen({ onAddReport, darkMode, theme }) {
                 <select
                   value={team}
                   onChange={(e) => handleTeamChange(e.target.value)}
-                  style={{ ...inputStyle, backgroundColor: inputBg, color: text, borderColor: border }}
+                  style={{
+                    ...inputStyle,
+                    backgroundColor: isTeamMissing
+                      ? darkMode
+                        ? "rgba(245, 158, 11, 0.10)"
+                        : "#fff9db"
+                      : inputBg,
+                    color: text,
+                    borderColor: isTeamMissing ? (darkMode ? "#f59e0b" : "#fcd34d") : border,
+                    boxShadow: isTeamMissing
+                      ? "0 0 0 1px rgba(245, 158, 11, 0.18) inset"
+                      : "none",
+                  }}
                 >
                   <option value="">班を選択</option>
                   {teamOptions.map((option) => (
@@ -497,7 +550,19 @@ export default function InputScreen({ onAddReport, darkMode, theme }) {
                 <select
                   value={worker}
                   onChange={(e) => setWorker(e.target.value)}
-                  style={{ ...inputStyle, backgroundColor: inputBg, color: text, borderColor: border }}
+                  style={{
+                    ...inputStyle,
+                    backgroundColor: isWorkerMissing
+                      ? darkMode
+                        ? "rgba(245, 158, 11, 0.10)"
+                        : "#fff9db"
+                      : inputBg,
+                    color: text,
+                    borderColor: isWorkerMissing ? (darkMode ? "#f59e0b" : "#fcd34d") : border,
+                    boxShadow: isWorkerMissing
+                      ? "0 0 0 1px rgba(245, 158, 11, 0.18) inset"
+                      : "none",
+                  }}
                   disabled={!team}
                 >
                   <option value="">{team ? "担当者を選択" : "先に班を選択してください"}</option>
@@ -533,14 +598,16 @@ export default function InputScreen({ onAddReport, darkMode, theme }) {
                 <button
                   type="button"
                   onClick={handleRecordOccurred}
-                  style={timeButtonStyle("#dc2626")}
+                  disabled={isOngoing}
+                  style={timeButtonStyle("#dc2626", isOngoing)}
                 >
                   発生
                 </button>
                 <button
                   type="button"
                   onClick={handleRecordRecovered}
-                  style={timeButtonStyle("#16a34a")}
+                  disabled={!isOngoing}
+                  style={timeButtonStyle("#16a34a", !isOngoing)}
                 >
                   復旧
                 </button>
@@ -551,7 +618,7 @@ export default function InputScreen({ onAddReport, darkMode, theme }) {
               style={{
                 display: "grid",
                 gridTemplateColumns: "1fr 1fr 1fr",
-                gap: "8px",
+                gap: isMobile ? "6px" : "8px",
                 alignItems: "stretch",
               }}
             >
@@ -562,10 +629,16 @@ export default function InputScreen({ onAddReport, darkMode, theme }) {
                   borderColor: isOngoing ? "#ef4444" : border,
                   color: text,
                   animation: isOngoing ? "occurredPulse 2.4s ease-in-out infinite" : "none",
+                  padding: isMobile ? "8px 8px" : "10px 10px",
+                  minHeight: isMobile ? "60px" : "56px",
                 }}
               >
-                <span style={{ color: muted, fontWeight: 700, fontSize: "11px" }}>発生</span>
-                <span style={{ fontWeight: 900, fontSize: "15px" }}>{toTimeOnly(occurredAt)}</span>
+                <span style={{ color: muted, fontWeight: 700, fontSize: isMobile ? "12px" : "13px" }}>
+                  発生
+                </span>
+                <span style={{ fontWeight: 900, fontSize: isMobile ? "15px" : "17px" }}>
+                  {toTimeOnly(shownOccurredAt)}
+                </span>
               </div>
 
               <div
@@ -574,10 +647,16 @@ export default function InputScreen({ onAddReport, darkMode, theme }) {
                   backgroundColor: readBg,
                   borderColor: border,
                   color: text,
+                  padding: isMobile ? "8px 8px" : "10px 10px",
+                  minHeight: isMobile ? "60px" : "56px",
                 }}
               >
-                <span style={{ color: muted, fontWeight: 700, fontSize: "11px" }}>復旧</span>
-                <span style={{ fontWeight: 900, fontSize: "15px" }}>{toTimeOnly(recoveredAt)}</span>
+                <span style={{ color: muted, fontWeight: 700, fontSize: isMobile ? "12px" : "13px" }}>
+                  復旧
+                </span>
+                <span style={{ fontWeight: 900, fontSize: isMobile ? "15px" : "17px" }}>
+                  {toTimeOnly(shownRecoveredAt)}
+                </span>
               </div>
 
               <div
@@ -588,23 +667,23 @@ export default function InputScreen({ onAddReport, darkMode, theme }) {
                     : "linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)",
                   borderColor: darkMode ? "#1d4ed8" : "#bfdbfe",
                   color: darkMode ? "#dbeafe" : "#1d4ed8",
+                  padding: isMobile ? "8px 8px" : "10px 10px",
+                  minHeight: isMobile ? "60px" : "56px",
                 }}
               >
-                <span style={{ fontWeight: 700, fontSize: "11px" }}>停止</span>
-                <span style={{ fontWeight: 900, fontSize: "15px" }}>{formatDuration(downtimeSeconds)}</span>
+                <span style={{ fontWeight: 700, fontSize: isMobile ? "12px" : "13px" }}>
+                  停止
+                </span>
+                <span style={{ fontWeight: 900, fontSize: isMobile ? "15px" : "17px" }}>
+                  {formatDuration(shownDowntimeSeconds)}
+                </span>
               </div>
-            </div>
-
-            <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
-              <button type="submit" style={primaryButtonStyle}>
-                報告
-              </button>
             </div>
           </div>
         </form>
       </div>
 
-      {isMobile ? noticeBar : null}
+      {noticeBar}
     </div>
   );
 }
@@ -630,6 +709,7 @@ const inputStyle = {
   fontSize: "14px",
   outline: "none",
   minHeight: "46px",
+  border: "1px solid",
 };
 
 const compactInlineBoxStyle = {
@@ -641,47 +721,49 @@ const compactInlineBoxStyle = {
   justifyContent: "center",
   gap: "2px",
   minHeight: "56px",
+  minWidth: 0,
+  overflow: "hidden",
 };
 
-const primaryButtonStyle = {
-  padding: "13px 20px",
-  borderRadius: "999px",
-  border: "none",
-  backgroundColor: "#2563eb",
-  color: "#fff",
-  fontWeight: "800",
-  fontSize: "15px",
-  cursor: "pointer",
-  minHeight: "50px",
-  minWidth: "140px",
-};
-
-function selectButtonStyle(active, darkMode) {
+function selectButtonStyle(active, darkMode, missing = false) {
   return {
     padding: "13px 16px",
     borderRadius: "999px",
-    border: active ? "2px solid #93c5fd" : `1px solid ${darkMode ? "#475569" : "#d1d5db"}`,
-    backgroundColor: active ? "#2563eb" : darkMode ? "#0f172a" : "#ffffff",
-    color: active ? "#ffffff" : darkMode ? "#e5e7eb" : "#111827",
+    border: active
+      ? "2px solid #93c5fd"
+      : missing
+        ? `1px solid ${darkMode ? "#f59e0b" : "#fcd34d"}`
+        : `1px solid ${darkMode ? "#334155" : "#cbd5e1"}`,
+    backgroundColor: active
+      ? "#2563eb"
+      : missing
+        ? darkMode
+          ? "rgba(245, 158, 11, 0.10)"
+          : "#fff9db"
+        : darkMode
+          ? "#0f172a"
+          : "#ffffff",
+    color: active ? "#ffffff" : darkMode ? "#e5e7eb" : "#0f172a",
     fontWeight: "800",
+    fontSize: "14px",
     cursor: "pointer",
-    minHeight: "48px",
-    minWidth: "96px",
-    fontSize: "15px",
+    minHeight: "46px",
+    boxShadow: missing && !active
+      ? "0 0 0 1px rgba(245, 158, 11, 0.18) inset"
+      : "none",
   };
 }
 
-function timeButtonStyle(color) {
+function timeButtonStyle(color, disabled = false) {
   return {
-    width: "100%",
-    padding: "15px 20px",
-    borderRadius: "16px",
+    minHeight: "50px",
+    borderRadius: "14px",
     border: "none",
-    backgroundColor: color,
+    backgroundColor: disabled ? "#94a3b8" : color,
     color: "#fff",
     fontWeight: "900",
-    fontSize: "17px",
-    cursor: "pointer",
-    minHeight: "56px",
+    fontSize: "16px",
+    cursor: disabled ? "not-allowed" : "pointer",
+    opacity: disabled ? 0.65 : 1,
   };
 }

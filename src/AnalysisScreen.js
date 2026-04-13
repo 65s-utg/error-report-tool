@@ -94,7 +94,7 @@ export default function AnalysisScreen({ reports, onBack, darkMode, theme }) {
     [reports]
   );
 
-  const getRangeWindow = () => {
+  const rangeWindow = useMemo(() => {
     const current = new Date();
     let start = null;
     let end = null;
@@ -119,10 +119,10 @@ export default function AnalysisScreen({ reports, onBack, darkMode, theme }) {
     }
 
     return { start, end };
-  };
+  }, [rangeType, customStart, customEnd]);
 
   const filteredReports = useMemo(() => {
-    const { start, end } = getRangeWindow();
+    const { start, end } = rangeWindow;
 
     return reports.filter((report) => {
       const occurred = toDate(report.occurredAt);
@@ -156,9 +156,7 @@ export default function AnalysisScreen({ reports, onBack, darkMode, theme }) {
     });
   }, [
     reports,
-    rangeType,
-    customStart,
-    customEnd,
+    rangeWindow,
     lineFilter,
     categoryFilter,
     subCategoryFilter,
@@ -167,7 +165,7 @@ export default function AnalysisScreen({ reports, onBack, darkMode, theme }) {
   ]);
 
   const previousFilteredReports = useMemo(() => {
-    const { start, end } = getRangeWindow();
+    const { start, end } = rangeWindow;
     if (!start || !end) return [];
 
     const duration = end.getTime() - start.getTime();
@@ -196,9 +194,7 @@ export default function AnalysisScreen({ reports, onBack, darkMode, theme }) {
     });
   }, [
     reports,
-    rangeType,
-    customStart,
-    customEnd,
+    rangeWindow,
     lineFilter,
     categoryFilter,
     subCategoryFilter,
@@ -478,10 +474,10 @@ export default function AnalysisScreen({ reports, onBack, darkMode, theme }) {
       </div>
 
       <div style={heroStatsGridStyle}>
-        <HeroStatCard title="総件数" value={`${totalCount}件`} accent="blue" darkMode={darkMode} />
-        <HeroStatCard title="総停止時間" value={formatDuration(totalDowntimeSeconds)} accent="indigo" darkMode={darkMode} />
-        <HeroStatCard title="復旧済み件数" value={`${recoveredCount}件`} accent="green" darkMode={darkMode} />
-        <HeroStatCard title="平均停止時間" value={formatDuration(averageDowntimeSeconds)} accent="amber" darkMode={darkMode} />
+        <HeroStatCard title="トラブル発生件数" value={`${totalCount}件`} accent="blue" darkMode={darkMode} />
+        <HeroStatCard title="総停止時間（損失時間）" value={formatDuration(totalDowntimeSeconds)} accent="indigo" darkMode={darkMode} />
+        <HeroStatCard title="復旧完了件数" value={`${recoveredCount}件`} accent="green" darkMode={darkMode} />
+        <HeroStatCard title="1件あたり平均停止時間" value={formatDuration(averageDowntimeSeconds)} accent="amber" darkMode={darkMode} />
       </div>
 
       <div style={chartGridStyle}>
@@ -491,38 +487,30 @@ export default function AnalysisScreen({ reports, onBack, darkMode, theme }) {
             borderRadius: "18px",
             padding: "16px",
             boxShadow: darkMode
-              ? "0 16px 30px rgba(0,0,0,0.32)"
-              : "0 16px 30px rgba(15, 23, 42, 0.08)",
+              ? "0 16px 30px rgba(0,0,0,0.24)"
+              : "0 16px 30px rgba(15, 23, 42, 0.06)",
             border: `1px solid ${border}`,
           }}
         >
-          <div style={panelHeaderStyle}>
-            <h3 style={{ ...panelTitleStyle, color: text }}>
-              全ライン{chartMode === "count" ? "件数" : "停止時間（分）"}
-            </h3>
-            <span style={panelChipStyle}>{chartMode === "count" ? "COUNT" : "TIME"}</span>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px", gap: "8px" }}>
+            <div style={{ fontWeight: 900, color: text, fontSize: "16px" }}>ライン別 {chartMode === "count" ? "件数" : "停止時間(分)"}</div>
+            <span style={miniBadgeStyle}>{chartMode === "count" ? "件数" : "時間"}</span>
           </div>
 
-          <div style={{ width: "100%", height: isMobile ? 240 : 300 }}>
-            <ResponsiveContainer width="100%" height="100%">
+          <div style={{ width: "100%", height: 280 }}>
+            <ResponsiveContainer>
               <BarChart data={lineChartData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={darkMode ? "#334155" : "#e5e7eb"} />
-                <XAxis dataKey="name" tickLine={false} axisLine={false} stroke={muted} />
-                <YAxis allowDecimals={false} width={isMobile ? 28 : 40} tickLine={false} axisLine={false} stroke={muted} />
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 12 }} />
                 <Tooltip
-                  contentStyle={{
-                    backgroundColor: darkMode ? "#0f172a" : "#ffffff",
-                    border: `1px solid ${border}`,
-                    borderRadius: "12px",
-                    color: text,
-                  }}
-                  formatter={(value, name, props) => {
+                  formatter={(value, name, item) => {
                     if (chartMode === "count") return [`${value}件`, "件数"];
-                    return [formatDuration(props.payload.seconds), "停止時間"];
+                    return [`${item?.payload?.seconds ? formatDuration(item.payload.seconds) : "-"}`, "停止時間"];
                   }}
                 />
-                <Bar dataKey="display" fill="#2563eb" radius={[8, 8, 0, 0]}>
-                  {!isMobile ? <LabelList dataKey="display" position="top" /> : null}
+                <Bar dataKey="display" radius={[8, 8, 0, 0]}>
+                  <LabelList dataKey="display" position="top" fontSize={12} />
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -535,48 +523,30 @@ export default function AnalysisScreen({ reports, onBack, darkMode, theme }) {
             borderRadius: "18px",
             padding: "16px",
             boxShadow: darkMode
-              ? "0 16px 30px rgba(0,0,0,0.32)"
-              : "0 16px 30px rgba(15, 23, 42, 0.08)",
+              ? "0 16px 30px rgba(0,0,0,0.24)"
+              : "0 16px 30px rgba(15, 23, 42, 0.06)",
             border: `1px solid ${border}`,
           }}
         >
-          <div style={panelHeaderStyle}>
-            <h3 style={{ ...panelTitleStyle, color: text }}>
-              エラー大項目{chartMode === "count" ? "件数" : "停止時間（分）"}
-            </h3>
-            <span style={panelChipStyle}>{chartMode === "count" ? "COUNT" : "TIME"}</span>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px", gap: "8px" }}>
+            <div style={{ fontWeight: 900, color: text, fontSize: "16px" }}>大項目別 {chartMode === "count" ? "件数" : "停止時間(分)"}</div>
+            <span style={miniBadgeStyle}>{chartMode === "count" ? "件数" : "時間"}</span>
           </div>
 
-          <div style={{ width: "100%", height: isMobile ? 260 : 300 }}>
-            <ResponsiveContainer width="100%" height="100%">
+          <div style={{ width: "100%", height: 280 }}>
+            <ResponsiveContainer>
               <BarChart data={categoryChartData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={darkMode ? "#334155" : "#e5e7eb"} />
-                <XAxis
-                  dataKey="name"
-                  interval={0}
-                  angle={isMobile ? -30 : -15}
-                  textAnchor="end"
-                  height={isMobile ? 88 : 68}
-                  fontSize={isMobile ? 10 : 12}
-                  tickLine={false}
-                  axisLine={false}
-                  stroke={muted}
-                />
-                <YAxis allowDecimals={false} width={isMobile ? 28 : 40} tickLine={false} axisLine={false} stroke={muted} />
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 12 }} />
                 <Tooltip
-                  contentStyle={{
-                    backgroundColor: darkMode ? "#0f172a" : "#ffffff",
-                    border: `1px solid ${border}`,
-                    borderRadius: "12px",
-                    color: text,
-                  }}
-                  formatter={(value, name, props) => {
+                  formatter={(value, name, item) => {
                     if (chartMode === "count") return [`${value}件`, "件数"];
-                    return [formatDuration(props.payload.seconds), "停止時間"];
+                    return [`${item?.payload?.seconds ? formatDuration(item.payload.seconds) : "-"}`, "停止時間"];
                   }}
                 />
-                <Bar dataKey="display" fill={darkMode ? "#60a5fa" : "#0f172a"} radius={[8, 8, 0, 0]}>
-                  {!isMobile ? <LabelList dataKey="display" position="top" /> : null}
+                <Bar dataKey="display" radius={[8, 8, 0, 0]}>
+                  <LabelList dataKey="display" position="top" fontSize={12} />
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -589,59 +559,49 @@ export default function AnalysisScreen({ reports, onBack, darkMode, theme }) {
           background: panelBg,
           borderRadius: "18px",
           padding: "16px",
-          boxShadow: darkMode
-            ? "0 16px 30px rgba(0,0,0,0.32)"
-            : "0 16px 30px rgba(15, 23, 42, 0.08)",
           border: `1px solid ${border}`,
+          boxShadow: darkMode
+            ? "0 16px 30px rgba(0,0,0,0.24)"
+            : "0 16px 30px rgba(15, 23, 42, 0.06)",
         }}
       >
-        <div style={panelHeaderStyle}>
-          <h3 style={{ ...panelTitleStyle, color: text }}>報告一覧</h3>
-          <span style={panelChipStyle}>表示20件</span>
+        <div style={{ fontWeight: 900, color: text, fontSize: "16px", marginBottom: "14px" }}>
+          直近データ
         </div>
 
-        {visibleReports.length === 0 ? (
-          <p style={{ color: muted }}>該当データがありません</p>
-        ) : isMobile ? (
-          <div
-            style={{
-              display: "grid",
-              gap: "10px",
-              maxHeight: "620px",
-              overflowY: "auto",
-              paddingRight: "4px",
-            }}
-          >
-            {visibleReports.map((report) => (
+        {isMobile ? (
+          <div style={{ display: "grid", gap: "10px" }}>
+            {visibleReports.map((report, idx) => (
               <div
-                key={report.id}
+                key={report.id || report.incidentId || `${report.occurredAt}-${idx}`}
                 style={{
                   border: `1px solid ${border}`,
                   borderRadius: "14px",
                   padding: "12px",
-                  background: darkMode
-                    ? "linear-gradient(135deg, #111827 0%, #1f2937 100%)"
-                    : "linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)",
+                  backgroundColor: darkMode ? "#0f172a" : "#ffffff",
                 }}
               >
                 <div style={reportTopRowStyle}>
                   <span style={badgeStyle}>{report.line || "-"}</span>
-                  <span style={{ ...smallMutedStyle, color: muted }}>{formatDuration(report.downtimeSeconds)}</span>
+                  <span style={{ ...smallMutedStyle, color: muted }}>
+                    {report.recoveredAt ? "復旧済み" : "発生中"}
+                  </span>
                 </div>
 
                 <div style={{ ...reportTitleStyle, color: text }}>
-                  {report.category || "-"} / {report.subCategory || "-"}
+                  {(report.category || "-")} / {(report.subCategory || "-")}
                 </div>
 
-                <div style={{ ...reportDetailStyle, color: darkMode ? "#cbd5e1" : "#334155" }}>
+                <div style={{ ...reportDetailStyle, color: text }}>
                   {report.detail || "-"}
                 </div>
 
                 <div style={{ ...reportMetaStyle, color: muted }}>
-                  <div><strong>班:</strong> {report.team || "-"}</div>
-                  <div><strong>担当:</strong> {report.worker || "-"}</div>
-                  <div><strong>発生:</strong> {report.occurredAt || "-"}</div>
-                  <div><strong>復旧:</strong> {report.recoveredAt || "-"}</div>
+                  <div>班: {report.team || "-"}</div>
+                  <div>担当者: {report.worker || "-"}</div>
+                  <div>発生: {report.occurredAt || "-"}</div>
+                  <div>復旧: {report.recoveredAt || "-"}</div>
+                  <div>停止時間: {formatDuration(report.downtimeSeconds)}</div>
                 </div>
               </div>
             ))}
@@ -649,7 +609,7 @@ export default function AnalysisScreen({ reports, onBack, darkMode, theme }) {
         ) : (
           <div
             style={{
-              maxHeight: "520px",
+              overflowX: "auto",
               overflowY: "auto",
               borderRadius: "14px",
               border: `1px solid ${border}`,
@@ -677,8 +637,8 @@ export default function AnalysisScreen({ reports, onBack, darkMode, theme }) {
                 </tr>
               </thead>
               <tbody>
-                {visibleReports.map((report) => (
-                  <tr key={report.id}>
+                {visibleReports.map((report, idx) => (
+                  <tr key={report.id || report.incidentId || `${report.occurredAt}-${idx}`}>
                     <td style={{ ...tdStyle, color: text, backgroundColor: panelBg }}>{report.line || "-"}</td>
                     <td style={{ ...tdStyle, color: text, backgroundColor: panelBg }}>{report.category || "-"}</td>
                     <td style={{ ...tdStyle, color: text, backgroundColor: panelBg }}>{report.subCategory || "-"}</td>
@@ -701,44 +661,82 @@ export default function AnalysisScreen({ reports, onBack, darkMode, theme }) {
 
 function HeroStatCard({ title, value, accent, darkMode }) {
   const accentMap = {
-    blue: ["#eff6ff", "#2563eb", "#1e3a8a"],
-    indigo: ["#eef2ff", "#4f46e5", "#c7d2fe"],
-    green: ["#ecfdf5", "#16a34a", "#bbf7d0"],
-    amber: ["#fffbeb", "#d97706", "#fde68a"],
+    blue: {
+      bg: "#eff6ff",
+      valueColor: "#1d4ed8",
+      titleColor: "#1e3a8a",
+      darkValueColor: "#ffffff",
+      darkTitleColor: "#e5e7eb",
+      borderColor: "#bfdbfe",
+    },
+    indigo: {
+      bg: "#eef2ff",
+      valueColor: "#4338ca",
+      titleColor: "#312e81",
+      darkValueColor: "#ffffff",
+      darkTitleColor: "#e5e7eb",
+      borderColor: "#c7d2fe",
+    },
+    green: {
+      bg: "#ecfdf5",
+      valueColor: "#16a34a",
+      titleColor: "#166534",
+      darkValueColor: "#ffffff",
+      darkTitleColor: "#e5e7eb",
+      borderColor: "#bbf7d0",
+    },
+    amber: {
+      bg: "#fffbeb",
+      valueColor: "#d97706",
+      titleColor: "#92400e",
+      darkValueColor: "#ffffff",
+      darkTitleColor: "#e5e7eb",
+      borderColor: "#fde68a",
+    },
   };
-  const [bg, color, darkText] = accentMap[accent] || accentMap.blue;
+
+  const palette = accentMap[accent] || accentMap.blue;
 
   return (
     <div
       style={{
         background: darkMode
-          ? `linear-gradient(135deg, #111827 0%, ${color}22 100%)`
-          : `linear-gradient(135deg, ${bg} 0%, #ffffff 100%)`,
-        border: `1px solid ${darkMode ? "#334155" : bg}`,
-        borderRadius: "16px",
-        padding: "16px",
+          ? "linear-gradient(135deg, #111827 0%, #1f2937 100%)"
+          : palette.bg,
+        borderRadius: "18px",
+        padding: "18px",
+        border: darkMode
+          ? "1px solid #334155"
+          : `1px solid ${palette.borderColor}`,
         boxShadow: darkMode
-          ? "0 14px 24px rgba(0,0,0,0.30)"
-          : "0 14px 24px rgba(15, 23, 42, 0.07)",
+          ? "0 14px 24px rgba(0,0,0,0.25)"
+          : "0 14px 24px rgba(15, 23, 42, 0.08)",
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "center",
+        gap: "8px",
+        minHeight: "96px",
       }}
     >
       <div
         style={{
-          fontSize: "11px",
-          color: darkMode ? "#cbd5e1" : "#64748b",
-          marginBottom: "7px",
-          fontWeight: "700",
-          letterSpacing: "0.04em",
+          fontSize: "14px",
+          fontWeight: "900",
+          letterSpacing: "0.01em",
+          color: darkMode ? palette.darkTitleColor : palette.titleColor,
+          lineHeight: 1.35,
         }}
       >
         {title}
       </div>
+
       <div
         style={{
-          fontSize: "clamp(20px, 4vw, 28px)",
-          color: darkMode ? darkText : color,
+          fontSize: "30px",
           fontWeight: "900",
+          color: darkMode ? palette.darkValueColor : palette.valueColor,
           lineHeight: 1.15,
+          letterSpacing: "0.01em",
           wordBreak: "break-word",
         }}
       >
@@ -748,24 +746,9 @@ function HeroStatCard({ title, value, accent, darkMode }) {
   );
 }
 
-const panelHeaderStyle = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  gap: "10px",
-  marginBottom: "12px",
-  flexWrap: "wrap",
-};
-
-const panelTitleStyle = {
-  margin: 0,
-  fontSize: "17px",
-  fontWeight: "800",
-};
-
-const panelChipStyle = {
+const miniBadgeStyle = {
   display: "inline-block",
-  padding: "5px 9px",
+  padding: "5px 10px",
   borderRadius: "999px",
   backgroundColor: "#eff6ff",
   color: "#2563eb",
@@ -837,6 +820,7 @@ const inputStyle = {
   fontSize: "14px",
   outline: "none",
   minHeight: "46px",
+  border: "1px solid",
 };
 
 const reportTopRowStyle = {
@@ -886,12 +870,12 @@ function rangeButtonStyle(active, darkMode) {
   return {
     padding: "10px 14px",
     borderRadius: "999px",
-    border: active ? "2px solid #93c5fd" : `1px solid ${darkMode ? "#475569" : "#cbd5e1"}`,
+    border: active ? "2px solid #93c5fd" : `1px solid ${darkMode ? "#334155" : "#cbd5e1"}`,
     backgroundColor: active ? "#2563eb" : darkMode ? "#0f172a" : "#ffffff",
     color: active ? "#ffffff" : darkMode ? "#e5e7eb" : "#0f172a",
     fontWeight: "800",
+    fontSize: "13px",
     cursor: "pointer",
-    fontSize: "12px",
-    minHeight: "44px",
+    minHeight: "42px",
   };
 }
