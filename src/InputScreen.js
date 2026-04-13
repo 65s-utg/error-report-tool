@@ -1,19 +1,44 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
+function buildSlackText(report, type) {
+  const eventLabel = type === "occurred" ? "発生" : "復旧";
+  const downtime =
+    type === "recovered" ? ` | 停止:${formatDuration(report.downtimeSeconds)}` : "";
+
+  const detailText = report.detail ? ` | 詳細:${report.detail}` : "";
+
+  return [
+    `[${eventLabel}]`,
+    `ライン:${report.line}`,
+    `大項目:${report.category}`,
+    `中項目:${report.subCategory}`,
+    `班:${report.team}`,
+    `担当:${report.worker}`,
+    `発生:${report.occurredAt}`,
+    type === "recovered" ? `復旧:${report.recoveredAt}` : null,
+    `${downtime}${detailText}`,
+  ]
+    .filter(Boolean)
+    .join(" | ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 async function sendToSlack(report, type) {
-  const res = await fetch('/api/slack-post', {
+  const text = buildSlackText(report, type);
+
+  const res = await fetch("/api/slack-post", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      ...report,
-      type,
-    }),
+    body: JSON.stringify({ text }),
   });
 
-  if (!res.ok) {
-    throw new Error("Slack送信に失敗しました");
+  const data = await res.json().catch(() => null);
+
+  if (!res.ok || !data?.ok) {
+    throw new Error(data?.error || "Slack送信に失敗しました");
   }
 }
 const lineOptions = ["G3", "M5", "M6", "M7", "M8", "M9"];
@@ -315,25 +340,25 @@ export default function InputScreen({ onAddReport, darkMode, theme }) {
     setDetail("");
   };
 
-  const handleRecordOccurred = async() => {
+  const handleRecordOccurred = async () => {
     if (!validateRequiredFields()) return;
     if (isOngoing) {
       setNotice("この案件はすでに発生中です");
       return;
     }
-
+  
     if (clearDisplayTimerRef.current) {
       clearTimeout(clearDisplayTimerRef.current);
       clearDisplayTimerRef.current = null;
     }
-
+  
     const occurred = getNowDateTimeString();
     const newIncidentId = `incident-${Date.now()}`;
-
+  
     setOccurredAt(occurred);
     setRecoveredAt("");
     setIncidentId(newIncidentId);
-
+  
     const report = {
       incidentId: newIncidentId,
       line,
@@ -347,11 +372,16 @@ export default function InputScreen({ onAddReport, darkMode, theme }) {
       downtimeSeconds: 0,
       status: "発生中",
     };
-
-    onAddReport(report);
-    await sendToSlack(report, "occurred");
-    saveSelections();
-    setNotice(`Slackの${line}チャンネルに発生を投稿しました`);
+  
+    try {
+      onAddReport(report);
+      await sendToSlack(report, "occurred");
+      saveSelections();
+      setNotice(`Slack送信成功: ${line} / 発生`);
+    } catch (error) {
+      console.error("発生投稿エラー:", error);
+      setNotice(`Slack送信失敗: ${error.message}`);
+    }
   };
 
   const handleRecordRecovered = async () => {
@@ -359,20 +389,20 @@ export default function InputScreen({ onAddReport, darkMode, theme }) {
       setNotice("先に発生を登録してください");
       return;
     }
-
+  
     if (clearDisplayTimerRef.current) {
       clearTimeout(clearDisplayTimerRef.current);
       clearDisplayTimerRef.current = null;
     }
-
+  
     const recovered = getNowDateTimeString();
     const seconds = calcDowntimeSeconds(occurredAt, recovered);
-
+  
     setRecoveredAt(recovered);
     setDisplayOccurredAt(occurredAt);
     setDisplayRecoveredAt(recovered);
     setDisplayDowntimeSeconds(seconds);
-
+  
     clearDisplayTimerRef.current = setTimeout(() => {
       setOccurredAt("");
       setRecoveredAt("");
@@ -382,7 +412,7 @@ export default function InputScreen({ onAddReport, darkMode, theme }) {
       setIncidentId("");
       clearDisplayTimerRef.current = null;
     }, 6000);
-
+  
     const report = {
       incidentId,
       line,
@@ -396,13 +426,17 @@ export default function InputScreen({ onAddReport, darkMode, theme }) {
       downtimeSeconds: seconds,
       status: "復旧",
     };
-
-    onAddReport(report);
-    await sendToSlack(report, "recovered");
-    saveSelections();
-    setNotice(`Slackの${line}チャンネルに復旧を投稿しました`);
-
-    resetFormAfterRecovery();
+  
+    try {
+      onAddReport(report);
+      await sendToSlack(report, "recovered");
+      saveSelections();
+      setNotice(`Slack送信成功: ${line} / 復旧`);
+      resetFormAfterRecovery();
+    } catch (error) {
+      console.error("復旧投稿エラー:", error);
+      setNotice(`Slack送信失敗: ${error.message}`);
+    }
   };
 
   const panelBg = darkMode ? theme.panelBg : "#ffffff";
